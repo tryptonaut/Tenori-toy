@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mara Tenori Toy</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: #0f121b;
+    color: #f5f6ff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  body { padding: 14px; }
+  .app { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 30px; margin: 0 0 4px; }
+  p { color: #abb3c8; margin: 0 0 10px; }
+  .panel {
+    background: #191d29;
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 18px;
+    padding: 10px;
+    margin-bottom: 12px;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  button, select {
+    border: 0;
+    border-radius: 12px;
+    min-height: 42px;
+    font: inherit;
+    font-weight: 800;
+    color: white;
+    background: #30384f;
+  }
+  #playBtn {
+    grid-column: 1 / -1;
+    background: #ffd06d;
+    color: #201400;
+    font-size: 19px;
+  }
+  .wide { grid-column: 1 / -1; }
+  label {
+    display: flex;
+    justify-content: space-between;
+    color: #abb3c8;
+    font-weight: 700;
+    margin: 8px 0 4px;
+  }
+  input { width: 100%; }
+  select { width: 100%; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+  }
+  .cell {
+    background: #414b66;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 5px;
+    min-height: 0;
+    height: auto;
+    padding: 0;
+    touch-action: manipulation;
+  }
+  .cell.on {
+    background: #8bd8ff;
+    box-shadow: 0 0 10px rgba(139,216,255,.95);
+  }
+  .cell.playhead {
+    outline: 2px solid #ffffff;
+    outline-offset: -2px;
+  }
+  .cell.flash {
+    background: #ffffff;
+  }
+  .note {
+    font-size: 14px;
+    line-height: 1.35;
+    color: #abb3c8;
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <h1>Mara Tenori Toy</h1>
+  <p>Static-grid goblin edition 😈</p>
+
+  <section class="panel controls">
+    <button id="playBtn" type="button" onclick="togglePlay()">▶ Play</button>
+    <button type="button" onclick="clearGrid()">Clear</button>
+    <button type="button" onclick="randomGrid()">Random</button>
+    <button type="button" onclick="setMinor()">Minor</button>
+    <button type="button" onclick="setMajor()">Major</button>
+
+    <div class="wide">
+      <label><span>BPM</span><strong id="bpmRead">120</strong></label>
+      <input id="bpm" type="range" min="60" max="220" value="120" oninput="changeBpm()">
+    </div>
+
+    <div class="wide">
+      <label><span>Wave</span><strong id="waveRead">sine</strong></label>
+      <select id="wave" onchange="document.getElementById('waveRead').textContent=this.value">
+        <option>sine</option>
+        <option>triangle</option>
+        <option>square</option>
+        <option>sawtooth</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <p class="note">Tap squares. Make chaos.</p>
+</main>
+
+<script>
+const SIZE = 16;
+let audio = null;
+let playing = false;
+let stepIndex = 0;
+let timer = null;
+let pattern = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
+let scale = [0,2,3,5,7,8,10,12,14,15,17,19,20,22,24,27];
+
+const grid = document.getElementById("grid");
+
+for (let r = 0; r < SIZE; r++) {
+  for (let c = 0; c < SIZE; c++) {
+    const btn = document.createElement("button");
+    btn.className = "cell";
+    btn.dataset.r = r;
+    btn.dataset.c = c;
+    btn.onclick = () => tapCell(r,c);
+    grid.appendChild(btn);
+  }
+}
+
+function q(r,c) {
+  return document.querySelector('[data-r="'+r+'"][data-c="'+c+'"]');
+}
+function initAudio() {
+  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state === "suspended") audio.resume();
+}
+
+function midiToFreq(m) {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+function rowFreq(row) {
+  return midiToFreq(48 + scale[SIZE - 1 - row]);
+}
+
+function blip(freq) {
+  initAudio();
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+
+  osc.type = document.getElementById("wave").value;
+  osc.frequency.value = freq;
+
+  gain.gain.setValueAtTime(0.001, t);
+  gain.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+  osc.connect(gain);
+  gain.connect(audio.destination);
+
+  osc.start(t);
+  osc.stop(t + 0.2);
+}
+
+function tapCell(r,c) {
+  initAudio();
+  pattern[r][c] = !pattern[r][c];
+  q(r,c).classList.toggle("on", pattern[r][c]);
+  if (pattern[r][c]) blip(rowFreq(r));
+}
+
+function stepMs() {
+  return (60000 / Number(document.getElementById("bpm").value)) / 4;
+}
+
+function markPlayhead() {
+  document.querySelectorAll(".cell").forEach(el => el.classList.remove("playhead"));
+  if (!playing) return;
+  for (let r = 0; r < SIZE; r++) q(r,stepIndex).classList.add("playhead");
+}
+
+function tick() {
+  initAudio();
+
+  for (let r = 0; r < SIZE; r++) {
+    const cell = q(r, stepIndex);
+
+    if (pattern[r][stepIndex]) {
+      blip(rowFreq(r));
+      cell.classList.add("flash");
+      setTimeout(() => cell.classList.remove("flash"), 70);
+    }
+  }
+
+  markPlayhead();
+  stepIndex = (stepIndex + 1) % SIZE;
+}
+
+function togglePlay() {
+  initAudio();
+
+  if (playing) {
+    playing = false;
+    clearInterval(timer);
+    timer = null;
+    document.getElementById("playBtn").textContent = "▶ Play";
+    markPlayhead();
+  } else {
+    playing = true;
+    stepIndex = 0;
+    document.getElementById("playBtn").textContent = "■ Stop";
+    tick();
+    timer = setInterval(tick, stepMs());
+  }
+}
+
+function clearGrid() {
+  pattern = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
+  document.querySelectorAll(".cell").forEach(el => {
+    el.classList.remove("on", "flash", "playhead");
+  });
+}
+
+function randomGrid() {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      pattern[r][c] = Math.random() < 0.18;
+      q(r,c).classList.toggle("on", pattern[r][c]);
+    }
+  }
+}
+
+function setMinor() {
+  scale = [0,2,3,5,7,8,10,12,14,15,17,19,20,22,24,27];
+}
+
+function setMajor() {
+  scale = [0,2,4,5,7,9,11,12,14,16,17,19,21,23,24,28];
+}
+
+function changeBpm() {
+  document.getElementById("bpmRead").textContent = document.getElementById("bpm").value;
+
+  if (playing) {
+    clearInterval(timer);
+    timer = setInterval(tick, stepMs());
+  }
+}
+</script>
+</body>
+</html>
